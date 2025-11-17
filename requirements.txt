@@ -1,0 +1,12 @@
+# Integration-v1 Requirements
+
+# Hand Recognition
+mediapipe>=0.10.21
+
+# Camera and Image Processing
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Standard library only for APIs (no external dependencies)
+# - overlay/overlay.py: json, math, os, typing
+# - object-layout/api/map_api.py: pathlib, typing, json
