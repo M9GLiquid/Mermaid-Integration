@@ -6,7 +6,7 @@ Minimal integration package that connects three APIs for hand recognition with g
 
 This integration follows SoC principles with three independent APIs:
 
-1. **Hand Recognition API** (`hand_recognition/`)
+1. **Hand Recognition API** (`hand_recognition/hand-recognition-api.py`)
    - Detects hand gestures (Open_Palm, Closed_Fist)
    - Provides hand position coordinates from camera stream
    - Uses MediaPipe for gesture recognition
@@ -29,7 +29,7 @@ Integration-v1/
 ├── demo/
 │   └── hand_grid_demo.py     # Demo implementation
 ├── hand_recognition/
-│   ├── hand_recognition.py   # Hand recognition module
+│   ├── hand-recognition-api.py  # Hand Recognition API
 │   └── gesture_recognizer.task  # MediaPipe model
 ├── overlay/
 │   ├── overlay-api.py        # GPSOverlay API
@@ -95,8 +95,8 @@ This package is completely standalone:
 ## API Independence
 
 Each API is independent and can be replaced:
-- **Hand Recognition**: Replace `hand_recognition.py` with different recognition system
+- **Hand Recognition**: Replace `hand-recognition-api.py` with different recognition system
 - **Overlay**: Replace `overlay-api.py` with different coordinate transformation
 - **Layout**: Replace `layout-api.py` with different grid management
 
-The `main.py` orchestrator connects them together following SoC principles.
+The `main.py` orchestrator connects all three APIs together following SoC principles.

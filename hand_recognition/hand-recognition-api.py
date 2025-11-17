@@ -1,3 +1,25 @@
+"""
+Hand Recognition API - Standalone gesture recognition module
+
+Detects hand gestures (Open_Palm, Closed_Fist) and provides hand position coordinates
+from camera stream using MediaPipe.
+
+This is a standalone API that can be exported and used independently.
+
+Usage:
+    from hand_recognition_api import GestureRecognizer
+    
+    recognizer = GestureRecognizer()
+    recognizer.run()
+    
+    while recognizer.running:
+        x, y = recognizer.get_position()
+        gesture = recognizer.get_gesture()
+        # Process gesture...
+    
+    recognizer.stop()
+"""
+
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -5,8 +27,8 @@ import threading
 import numpy as np
 from pathlib import Path
 
+# Configuration constants
 STREAM_URL = "http://192.168.1.2/axis-cgi/mjpg/video.cgi?camera=1&resolution=2048x1536"
-# Model path relative to this script's directory
 MODEL_PATH = str(Path(__file__).parent / "gesture_recognizer.task")
 MAX_HANDS = 2
 

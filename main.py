@@ -33,12 +33,13 @@ sys.path.insert(0, str(integration_root / "overlay"))
 sys.path.insert(0, str(integration_root / "object-layout" / "api"))
 sys.path.insert(0, str(integration_root))
 
-# Import APIs using simplified utility functions
-hr = import_api(
-    integration_root / "hand_recognition" / "hand_recognition.py",
-    "hand_recognition",
-    "Make sure hand_recognition.py is in Integration-v1/hand_recognition/"
+# Import all three APIs using simplified utility functions
+hand_recognition_api = import_api(
+    integration_root / "hand_recognition" / "hand-recognition-api.py",
+    "hand_recognition_api",
+    "Make sure hand-recognition-api.py is in Integration-v1/hand_recognition/"
 )
+GestureRecognizer = hand_recognition_api.GestureRecognizer
 
 overlay_api = import_api(
     integration_root / "overlay" / "overlay-api.py",

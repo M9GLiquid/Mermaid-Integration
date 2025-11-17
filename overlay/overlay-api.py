@@ -868,3 +868,65 @@ class GPSOverlay:
             rectified_frame[mask] = self._grid_overlay_cache[mask]
         
         return rectified_frame, self._offset_info
+    
+    def get_grid_cell_with_height_offset(self, x: float, y: float, height_mm: float = 1000.0) -> Dict:
+        """
+        Get grid cell position with height offset correction.
+        
+        Corrects for objects above the arena floor (e.g., hand 1m above floor).
+        Uses perspective projection geometry to calculate position-dependent offset.
+        
+        Args:
+            x: GPS server X coordinate
+            y: GPS server Y coordinate
+            height_mm: Height of object above arena floor in millimeters (default: 1000mm = 1m)
+        
+        Returns:
+            Dictionary with corrected grid cell information (same format as get_grid_cell)
+        """
+        import math
+        
+        # Get apparent position
+        cell_info = self.get_grid_cell(x, y)
+        if not cell_info["in_bounds"]:
+            return cell_info
+        
+        row_apparent = cell_info["row"]
+        col_apparent = cell_info["col"]
+        
+        # Calculate offset using perspective projection
+        h = self.homography
+        perspective_scale = h[2][2]
+        camera_angle_rad = math.acos(perspective_scale)
+        base_offset_mm = height_mm * math.tan(camera_angle_rad)
+        
+        # Convert to pixels
+        base_offset_x_px = base_offset_mm / self.mm_per_pixel_x
+        base_offset_y_px = base_offset_mm / self.mm_per_pixel_y
+        
+        # Grid cell dimensions
+        cell_width = (self.arena_bounds["right"] - self.arena_bounds["left"]) / self.grid_cols
+        cell_height = (self.arena_bounds["bottom"] - self.arena_bounds["top"]) / self.grid_rows
+        
+        # Distance from center (normalized)
+        center_row, center_col = self.grid_rows / 2.0, self.grid_cols / 2.0
+        row_distance = (row_apparent - center_row) / center_row
+        col_distance = (col_apparent - center_col) / center_col
+        
+        # Apply position-dependent offset
+        row_offset = (base_offset_y_px / cell_height) * row_distance
+        col_offset = -(base_offset_x_px / cell_width) * col_distance
+        
+        # Calculate corrected position
+        row_corrected = int(round(row_apparent + row_offset))
+        col_corrected = int(round(col_apparent + col_offset))
+        
+        # Clamp to bounds
+        row_corrected = max(0, min(row_corrected, self.grid_rows - 1))
+        col_corrected = max(0, min(col_corrected, self.grid_cols - 1))
+        
+        # Return updated cell info
+        result = cell_info.copy()
+        result["row"] = row_corrected
+        result["col"] = col_corrected
+        return result
