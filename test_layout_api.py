@@ -16,11 +16,11 @@ from utils import import_api, extract_attrs
 
 # Add Integration-v1 root to path
 integration_root = Path(__file__).parent
-sys.path.insert(0, str(integration_root / "object-layout" / "api"))
+sys.path.insert(0, str(integration_root / "apis" / "layout-api"))
 
 # Import layout-api.py using simplified utility
 layout_api = import_api(
-    integration_root / "object-layout" / "api" / "layout-api.py",
+    integration_root / "apis" / "layout-api" / "layout-api.py",
     "layout_api"
 )
 

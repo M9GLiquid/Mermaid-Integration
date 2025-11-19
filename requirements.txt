@@ -10,3 +10,12 @@ numpy>=1.24.0
 # Standard library only for APIs (no external dependencies)
 # - overlay/overlay.py: json, math, os, typing
 # - object-layout/api/map_api.py: pathlib, typing, json
+
+# ROS2 (installeras via ROS2 system, inte pip)
+# - ros2-api/ros2-api.py: rclpy, std_msgs (installeras med ROS2)
+# Note: ROS2 måste vara installerat och aktiverat:
+#   source /opt/ros/jazzy/setup.bash
+#   # eller din ROS2-distribution
+
+# ROS2 dependencies som behövs i venv (trots att ROS2 är system-wide)
+pyyaml>=6.0  # Används av rclpy.parameter

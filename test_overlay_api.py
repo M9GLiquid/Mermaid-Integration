@@ -25,11 +25,11 @@ from utils import import_api, extract_attrs
 
 # Add Integration-v1 root to path
 integration_root = Path(__file__).parent
-sys.path.insert(0, str(integration_root / "overlay"))
+sys.path.insert(0, str(integration_root / "apis" / "overlay-api"))
 
 # Import overlay-api.py using simplified utility
 overlay_api = import_api(
-    integration_root / "overlay" / "overlay-api.py",
+    integration_root / "apis" / "overlay-api" / "overlay-api.py",
     "overlay_api"
 )
 GPSOverlay = overlay_api.GPSOverlay
@@ -63,7 +63,8 @@ def test_coordinates():
         
     except FileNotFoundError:
         print("[ERROR] gps_overlay.json not found!")
-        print("Make sure gps_overlay.json is in Integration-v1/overlay/")
+        print("Make sure gps_overlay.json is in Integration-v1/apis/overlay-api/")
+        print("Initialize submodules: git submodule update --init")
         return False
     except Exception as e:
         print(f"[ERROR] {e}")
@@ -107,7 +108,8 @@ def test_grid_cells():
         
     except FileNotFoundError:
         print("[ERROR] gps_overlay.json not found!")
-        print("Make sure gps_overlay.json is in Integration-v1/overlay/")
+        print("Make sure gps_overlay.json is in Integration-v1/apis/overlay-api/")
+        print("Initialize submodules: git submodule update --init")
         return False
     except Exception as e:
         print(f"[ERROR] {e}")
@@ -153,7 +155,8 @@ def test_real_world():
         
     except FileNotFoundError:
         print("[ERROR] gps_overlay.json not found!")
-        print("Make sure gps_overlay.json is in Integration-v1/overlay/")
+        print("Make sure gps_overlay.json is in Integration-v1/apis/overlay-api/")
+        print("Initialize submodules: git submodule update --init")
         return False
     except Exception as e:
         print(f"[ERROR] {e}")
@@ -230,7 +233,8 @@ def test_image_transform():
         
     except FileNotFoundError:
         print("[ERROR] gps_overlay.json not found!")
-        print("Make sure gps_overlay.json is in Integration-v1/overlay/")
+        print("Make sure gps_overlay.json is in Integration-v1/apis/overlay-api/")
+        print("Initialize submodules: git submodule update --init")
         return False
     except Exception as e:
         print(f"[ERROR] {e}")
@@ -299,7 +303,8 @@ def test_stream_transform():
         
     except FileNotFoundError:
         print("[ERROR] gps_overlay.json not found!")
-        print("Make sure gps_overlay.json is in Integration-v1/overlay/")
+        print("Make sure gps_overlay.json is in Integration-v1/apis/overlay-api/")
+        print("Initialize submodules: git submodule update --init")
         return False
     except Exception as e:
         print(f"[ERROR] {e}")

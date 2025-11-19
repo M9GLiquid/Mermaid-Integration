@@ -32,6 +32,8 @@ def load_module(file_path: Path, module_name: str) -> Any:
         raise ImportError(f"Could not create spec for module: {file_path}")
     
     module = importlib.util.module_from_spec(spec)
+    # Registrera modulen i sys.modules för att undvika problem med dataclass och imports
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 

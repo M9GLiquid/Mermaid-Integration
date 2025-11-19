@@ -2,10 +2,11 @@
 """
 Integration-v1 - Main Entry Point
 
-This is the main orchestrator that connects the three APIs:
+This is the main orchestrator that connects the APIs:
 1. Hand Recognition API - Detects hand gestures and positions
 2. Overlay API - Transforms coordinates (GPS → Grid cells)
 3. Object Layout API - Manages grid map (walls, home, obstacles)
+4. ROS2 Position API - Robot position tracking from GPS Server
 
 Architecture follows Separation of Concerns (SoC):
 - Each API is independent and can be replaced
@@ -13,7 +14,8 @@ Architecture follows Separation of Concerns (SoC):
 - Demo logic is separated from API logic
 
 Usage:
-    python3 main.py
+    python3 main.py                    # Hand recognition demo
+    python3 -m demo.robot_position_demo  # Robot position tracking (spiral 9)
 """
 
 import sys
@@ -27,35 +29,44 @@ from utils import import_api, extract_attrs
 integration_root = Path(__file__).parent
 
 # IMPORTANT: Insert paths in order of priority to ensure we get the right modules
-# Put Integration-v1 paths FIRST to avoid importing from old demo/ folder
-sys.path.insert(0, str(integration_root / "hand_recognition"))
-sys.path.insert(0, str(integration_root / "overlay"))
-sys.path.insert(0, str(integration_root / "object-layout" / "api"))
+# APIs are now Git submodules in apis/ directory
+sys.path.insert(0, str(integration_root / "apis" / "overlay-api"))
+sys.path.insert(0, str(integration_root / "apis" / "layout-api"))
+sys.path.insert(0, str(integration_root / "apis" / "hand-recognition-api"))
 sys.path.insert(0, str(integration_root))
 
-# Import all three APIs using simplified utility functions
+# Import all three APIs using simplified utility functions (from Git submodules)
 hand_recognition_api = import_api(
-    integration_root / "hand_recognition" / "hand-recognition-api.py",
+    integration_root / "apis" / "hand-recognition-api" / "hand-recognition-api.py",
     "hand_recognition_api",
-    "Make sure hand-recognition-api.py is in Integration-v1/hand_recognition/"
+    "Make sure hand-recognition-api submodule is initialized: git submodule update --init"
 )
 GestureRecognizer = hand_recognition_api.GestureRecognizer
 
 overlay_api = import_api(
-    integration_root / "overlay" / "overlay-api.py",
+    integration_root / "apis" / "overlay-api" / "overlay-api.py",
     "overlay_api",
-    "Make sure overlay-api.py is in Integration-v1/overlay/"
+    "Make sure overlay-api submodule is initialized: git submodule update --init"
 )
 GPSOverlay = overlay_api.GPSOverlay
 
 layout_api = import_api(
-    integration_root / "object-layout" / "api" / "layout-api.py",
+    integration_root / "apis" / "layout-api" / "layout-api.py",
     "layout_api",
-    "Make sure layout-api.py is in Integration-v1/object-layout/api/"
+    "Make sure layout-api submodule is initialized: git submodule update --init"
 )
 get_map, get_map_json, get_symbol, FREE, OBSTACLE, HOME = extract_attrs(
     layout_api, 'get_map', 'get_map_json', 'get_symbol', 'FREE', 'OBSTACLE', 'HOME'
 )
+
+# Import ROS2 API for robot position tracking
+ros2_api = import_api(
+    integration_root / "apis" / "ros2-api" / "ros2-api.py",
+    "ros2_api",
+    "Make sure ros2-api files are available: ros2-api.py and ros2.py"
+)
+RobotPositionAPI = ros2_api.RobotPositionAPI
+SpiralRow = ros2_api.SpiralRow
 
 # Import demo orchestrator
 from demo.hand_grid_demo import HandGridDemo
@@ -74,10 +85,11 @@ def main():
     print("=" * 60)
     print("Integration-v1 - Hand Recognition with Grid Layout")
     print("=" * 60)
-    print("\nConnecting APIs:")
+    print("\nConnecting modules:")
     print("  1. Hand Recognition API - Detecting gestures")
     print("  2. Overlay API - Coordinate transformation")
     print("  3. Object Layout API - Grid map management")
+    print("  4. ROS2 Position API - Robot position tracking")
     print()
     
     # Initialize demo (which uses all three APIs)

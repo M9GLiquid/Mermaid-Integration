@@ -28,16 +28,47 @@ Integration-v1/
 ├── main.py                    # Main orchestrator (connects all APIs)
 ├── demo/
 │   └── hand_grid_demo.py     # Demo implementation
-├── hand_recognition/
-│   ├── hand-recognition-api.py  # Hand Recognition API
-│   └── gesture_recognizer.task  # MediaPipe model
-├── overlay/
-│   ├── overlay-api.py        # GPSOverlay API
-│   └── gps_overlay.json      # Calibration data
-└── object-layout/
-    └── api/
-        ├── layout-api.py     # Layout API (standalone)
-        └── grid.json          # Grid data
+├── apis/                      # Git submodules (API repositories)
+│   ├── overlay-api/          # Overlay API submodule
+│   │   ├── overlay-api.py
+│   │   └── gps_overlay.json
+│   ├── layout-api/           # Layout API submodule
+│   │   ├── layout-api.py
+│   │   └── grid.json
+│   └── hand-recognition-api/ # Hand Recognition API submodule
+│       ├── hand-recognition-api.py
+│       └── gesture_recognizer.task
+└── ...
+```
+
+**Note:** APIs are managed as Git submodules. See [Setup](#setup) for initialization instructions.
+
+## Setup
+
+### Initial Setup
+
+Clone the repository and initialize submodules:
+
+```bash
+git clone <repository-url> Integration-v1
+cd Integration-v1
+git submodule update --init --recursive
+```
+
+### Updating APIs
+
+To update APIs to their latest versions:
+
+```bash
+git submodule update --remote
+```
+
+To update a specific API:
+
+```bash
+cd apis/overlay-api
+git pull origin main
+cd ../..
 ```
 
 ## Usage
@@ -83,13 +114,31 @@ python3 test_overlay_api.py test_stream_transform
 - `mediapipe` - Hand gesture recognition
 - `opencv-python` - Camera stream handling
 - `numpy` - Numerical operations
+- ROS2 (Jazzy/Humble/Foxy) - For ROS2 Position API
+- `pyyaml` - Required for ROS2 (install in venv: `pip install pyyaml`)
+
+## Environment Setup
+
+**VIKTIGT**: Aktivera environment innan du kör programmet!
+
+```bash
+cd Integration-v1
+source ../setup_env.sh  # Aktiverar ROS2 Jazzy + venv automatiskt
+python3 main.py
+```
+
+Scriptet gör:
+- ✅ Aktiverar ROS2 Jazzy
+- ✅ Aktiverar venv från `Python/.venv`
+- ✅ Installerar requirements automatiskt om de saknas
 
 ## Standalone
 
 This package is completely standalone:
-- All APIs are self-contained
+- All APIs are self-contained Git submodules
 - No dependencies on other Mermaid projects
-- Can be copied and used independently
+- Can be cloned and used independently
+- Each API submodule can be updated independently
 - Each module can be replaced without affecting others
 
 ## API Independence
