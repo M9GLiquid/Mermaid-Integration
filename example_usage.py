@@ -8,13 +8,15 @@ Usage:
     python3 example_usage.py
 """
 
-from pathlib import Path
 import sys
 import importlib.util
+from pathlib import Path
 
 # Import layout-api.py (handles hyphen in filename)
 api_path = Path(__file__).parent / "layout-api.py"
 spec = importlib.util.spec_from_file_location("layout_api", api_path)
+if spec is None or spec.loader is None:
+    raise ImportError(f"Could not load layout_api module from {api_path}")
 layout_api = importlib.util.module_from_spec(spec)
 sys.modules["layout_api"] = layout_api
 spec.loader.exec_module(layout_api)
@@ -142,7 +144,7 @@ def example_map_info():
         free_pct = (info['free_count'] / info['total_cells']) * 100
         obstacle_pct = (info['obstacle_count'] / info['total_cells']) * 100
         home_pct = (info['home_count'] / info['total_cells']) * 100
-        print(f"\nPercentages:")
+        print("\nPercentages:")
         print(f"  Free: {free_pct:.1f}%")
         print(f"  Obstacle: {obstacle_pct:.1f}%")
         print(f"  Home: {home_pct:.1f}%")
