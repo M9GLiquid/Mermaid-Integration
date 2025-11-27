@@ -6,7 +6,6 @@ This folder contains everything you need to use the GPSOverlay API in your proje
 
 - `overlay.py` - The API code (no external dependencies)
 - `gps_overlay.json` - Calibration data (created by Tool 8)
-- `test_overlay.py` - Test script demonstrating API usage
 
 ## Quick Start
 
