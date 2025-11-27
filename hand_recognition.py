@@ -14,7 +14,27 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from api.modules.gps_overlay import GPSOverlay   # <- DIN kalibrerings-API
+# Try to import GPSOverlay from the canonical module; fall back to overlay API if exported separately
+try:
+    from api.modules.gps_overlay import GPSOverlay  # type: ignore
+except ImportError:
+    GPSOverlay = None  # type: ignore
+    overlay_paths = [
+        PROJECT_ROOT / "apis" / "overlay-api",
+        PROJECT_ROOT / "overlay-api",
+        PROJECT_ROOT / "overlay",
+    ]
+    for path in overlay_paths:
+        candidate = path / "overlay.py"
+        if candidate.exists():
+            sys.path.insert(0, str(path))
+            try:
+                from overlay import GPSOverlay  # type: ignore
+                break
+            except ImportError:
+                continue
+    if GPSOverlay is None:
+        raise ImportError("Could not import GPSOverlay (checked api.modules.gps_overlay and overlay.py)")
 
 # ============================
 # 0) AXIS CAMERA STREAM
