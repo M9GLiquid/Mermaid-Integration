@@ -30,7 +30,9 @@ Usage:
 import json
 import math
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
+
+import numpy as np
 
 
 class GPSOverlay:
@@ -41,7 +43,7 @@ class GPSOverlay:
     simple functions to transform GPS server coordinates.
     """
 
-    def __init__(self, json_path: str = None):
+    def __init__(self, json_path: Optional[str] = None):
         """
         Initialize the GPSOverlay API by loading calibration data.
         
@@ -108,6 +110,8 @@ class GPSOverlay:
         # - mm_per_pixel_x: Millimeters per pixel in X direction
         # - mm_per_pixel_y: Millimeters per pixel in Y direction
         self.real_world_available = "real_world" in self.data
+        self.mm_per_pixel_x: Optional[float]
+        self.mm_per_pixel_y: Optional[float]
         if self.real_world_available:
             self.mm_per_pixel_x = self.data["real_world"]["mm_per_pixel_x"]
             self.mm_per_pixel_y = self.data["real_world"]["mm_per_pixel_y"]
@@ -300,8 +304,12 @@ class GPSOverlay:
         base_offset_mm = height_mm * math.tan(camera_angle_rad)
         
         # Convert to pixels using real-world calibration
-        base_offset_x_px = base_offset_mm / self.mm_per_pixel_x
-        base_offset_y_px = base_offset_mm / self.mm_per_pixel_y
+        mm_x = self.mm_per_pixel_x
+        mm_y = self.mm_per_pixel_y
+        if mm_x is None or mm_y is None or mm_x == 0 or mm_y == 0:
+            return cell_info
+        base_offset_x_px = base_offset_mm / mm_x
+        base_offset_y_px = base_offset_mm / mm_y
         
         # Grid cell dimensions
         left, top = self.arena_bounds["left"], self.arena_bounds["top"]
