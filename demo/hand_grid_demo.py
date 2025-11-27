@@ -68,23 +68,23 @@ GESTURE_TO_CELL = {"FOOD": HOME, "THREAT": OBSTACLE}
 class HandGridDemo:
     """Demo that integrates hand recognition with grid updates."""
     
-    def __init__(self, overlay_json_path: str = None, grid_path: str = None):
+    def __init__(self, overlay_json_path: Optional[Path] = None, grid_path: Optional[Path] = None):
         integration_root = Path(__file__).parent.parent
         
         # Initialize overlay
         # Use config files from API submodules
-        overlay_json_path = overlay_json_path or str(integration_root / "apis" / "overlay-api" / "gps_overlay.json")
-        if not Path(overlay_json_path).exists():
-            print(f"Error: {overlay_json_path} not found")
+        overlay_path = Path(overlay_json_path) if overlay_json_path is not None else integration_root / "apis" / "overlay-api" / "gps_overlay.json"
+        if not overlay_path.exists():
+            print(f"Error: {overlay_path} not found")
             print("Make sure submodules are initialized: git submodule update --init")
             sys.exit(1)
         
-        self.overlay = GPSOverlay(overlay_json_path)
-        self.grid_path = grid_path or integration_root / "apis" / "layout-api" / "grid.json"
+        self.overlay = GPSOverlay(str(overlay_path))
+        self.grid_path: Path = Path(grid_path) if grid_path is not None else integration_root / "apis" / "layout-api" / "grid.json"
         self.recognizer = GestureRecognizer()
         self.grid = self._load_grid()
         
-        # Initialize ROS2 API for robot tracking (spiral 9)
+        # Initialize ROS2 API for robot tracking
         self.robot_api = RobotPositionAPI(
             topic='robotPositions',
             msg_type='string',
@@ -106,14 +106,32 @@ class HandGridDemo:
         self.last_robot_update = 0
         self.robot_update_interval = 0.5  # Uppdatera robotar var 0.5 sekund
         
-        # Temporary symbols overlay (for robots, hands, etc.)
-        # Maps (row, col) -> (symbol, original_symbol)
-        # These symbols temporarily replace underlying grid symbols
-        self.temporary_symbols: Dict[Tuple[int, int], Tuple[str, str]] = {}
+        # Position history tracking (last 2 positions per spiral for color fading)
+        self.position_history: Dict[int, List[Tuple[int, int]]] = {}  # spiral_id -> [(row, col), ...]
+        self.max_history_size = 2  # Keep 2 for color fading (darker → darkest)
+        
+        # Predicted paths tracking (2-4 grid cells ahead)
+        self.predicted_paths: Dict[int, List[Tuple[int, int]]] = {}  # spiral_id -> [(row, col), ...]
+        self.prediction_steps = 4  # Predict 4 grid cells ahead
+        
+        # Context-aware display settings
+        self.show_history_default = True  # Show history by default
+        self.show_predictions_default = True  # Show predictions by default
+        self.proximity_threshold = 5  # Show full details when spirals are within 5 grid cells
+        self.min_history_display = 1  # Minimum history to show (even when not in proximity)
+        self.min_prediction_display = 2  # Minimum predictions to show (even when not in proximity)
+        
+        # All robots use white color - number differentiates them
+        # History: darker white, Future: brighter white
+        
+        # Temporary symbols overlay (for robots, history, predictions, etc.)
+        # Maps (row, col) -> (symbol, original_symbol, type)
+        # type: 'robot', 'history_0', 'history_1', 'history_2', 'history_3', 'prediction_0', 'prediction_1', 'prediction_2', 'prediction_3'
+        self.temporary_symbols: Dict[Tuple[int, int], Tuple[str, str, str]] = {}
         
         print(f"Grid: {len(self.grid)}×{len(self.grid[0]) if self.grid else 0}")
         print(f"Gestures: Open_Palm→HOME ({get_symbol('HOME')}), Closed_Fist→OBSTACLE ({get_symbol('OBSTACLE')})")
-        print(f"Robots: Tracking all active robots (0-9)")
+        print("Robots: Tracking all active robots (0-9)")
         self._print_grid()
     
     def _load_grid(self) -> Grid:
@@ -172,7 +190,7 @@ class HandGridDemo:
         
         return changed
     
-    def _add_temporary_symbol(self, row: int, col: int, symbol: str) -> bool:
+    def _add_temporary_symbol(self, row: int, col: int, symbol: str, symbol_type: str = 'robot') -> bool:
         """
         Add a temporary symbol to the grid, replacing the underlying symbol.
         Stores the original symbol so it can be restored.
@@ -181,6 +199,7 @@ class HandGridDemo:
             row: Grid row
             col: Grid column
             symbol: Symbol to display (will replace underlying symbol)
+            symbol_type: Type of symbol ('robot', 'history_0', 'history_1', etc., 'prediction_0', etc.)
         
         Returns:
             True if symbol was added/changed, False otherwise
@@ -198,33 +217,57 @@ class HandGridDemo:
         # Check if there's already a temporary symbol here
         pos = (row, col)
         if pos in self.temporary_symbols:
-            existing_symbol, original = self.temporary_symbols[pos]
-            if existing_symbol == symbol:
-                return False  # Same symbol, no change
-            # Update symbol but keep original
-            self.temporary_symbols[pos] = (symbol, original)
+            _, _, existing_type = self.temporary_symbols[pos]
+            # Priority: robot > prediction > history (newer history > older history)
+            priority_order = {'robot': 3, 'prediction_0': 2, 'prediction_1': 2, 'prediction_2': 1, 'prediction_3': 1,
+                            'history_0': 1, 'history_1': 0, 'history_2': 0, 'history_3': 0}
+            existing_priority = priority_order.get(existing_type, 0)
+            new_priority = priority_order.get(symbol_type, 0)
+            
+            if new_priority <= existing_priority:
+                return False  # Lower priority, don't replace
+            
+            # Update symbol with higher priority
+            _, original, _ = self.temporary_symbols[pos]
+            self.temporary_symbols[pos] = (symbol, original, symbol_type)
             return True
         
         # Add new temporary symbol
-        self.temporary_symbols[pos] = (symbol, current_symbol)
+        self.temporary_symbols[pos] = (symbol, current_symbol, symbol_type)
         return True
     
-    def _remove_temporary_symbol(self, row: int, col: int) -> bool:
+    def _remove_temporary_symbol(self, row: int, col: int, symbol_type: Optional[str] = None) -> bool:
         """
         Remove a temporary symbol from the grid, restoring the original symbol.
         
         Args:
             row: Grid row
             col: Grid column
+            symbol_type: Optional - only remove if type matches (None = remove any)
         
         Returns:
             True if symbol was removed, False if no symbol was there
         """
         pos = (row, col)
         if pos in self.temporary_symbols:
-            del self.temporary_symbols[pos]
-            return True
+            if symbol_type is None or self.temporary_symbols[pos][2] == symbol_type:
+                del self.temporary_symbols[pos]
+                return True
         return False
+    
+    def _clear_symbols_by_type(self, symbol_type_prefix: str):
+        """
+        Clear all temporary symbols matching a type prefix (e.g., 'history_', 'prediction_').
+        
+        Args:
+            symbol_type_prefix: Prefix to match (e.g., 'history_', 'prediction_')
+        """
+        to_remove = []
+        for pos, (symbol, original, symbol_type) in self.temporary_symbols.items():
+            if symbol_type.startswith(symbol_type_prefix):
+                to_remove.append(pos)
+        for pos in to_remove:
+            del self.temporary_symbols[pos]
     
     def _move_temporary_symbol(self, old_row: int, old_col: int, new_row: int, new_col: int) -> bool:
         """
@@ -243,8 +286,8 @@ class HandGridDemo:
         if old_pos not in self.temporary_symbols:
             return False
         
-        # Get symbol and original from old position
-        symbol, original = self.temporary_symbols[old_pos]
+        # Get symbol, original, and type from old position
+        symbol, _, symbol_type = self.temporary_symbols[old_pos]
         
         # Remove from old position
         del self.temporary_symbols[old_pos]
@@ -253,23 +296,188 @@ class HandGridDemo:
         map_data = get_map(str(self.grid_path))
         if map_data and new_row < len(map_data) and new_col < len(map_data[new_row]):
             new_original = map_data[new_row][new_col]
-            self.temporary_symbols[(new_row, new_col)] = (symbol, new_original)
+            self.temporary_symbols[(new_row, new_col)] = (symbol, new_original, symbol_type)
             return True
         
         return False
     
     def _get_robot_symbol(self, robot_id: int) -> str:
         """
-        Get colored robot symbol showing robot ID.
+        Get robot symbol showing robot ID in white color.
         
         Args:
             robot_id: Robot ID (0-9)
         
         Returns:
-            Colored symbol string (yellow robot ID)
+            Colored symbol string (white)
         """
         robot_char = str(robot_id % 10)  # Ensure 0-9
-        return f"{Colors.YELLOW}{robot_char}{Colors.RESET}"
+        return f"{Colors.WHITE}{robot_char}{Colors.RESET}"
+    
+    def _get_history_symbol(self, robot_id: int, age: int) -> str:
+        """
+        Get symbol for history position - same number as robot, darker white.
+        Older positions are darker.
+        
+        Args:
+            robot_id: Robot ID (0-9)
+            age: Age index (0 = newest history, 1 = older history)
+        
+        Returns:
+            Colored number string (same number, darker white)
+        """
+        robot_char = str(robot_id % 10)
+        # Darker white for history (dimmer = older)
+        if age == 0:
+            color = '\033[37m'      # Dark white (newest history)
+        else:
+            color = '\033[37;2m'    # Dim dark white (older history)
+        
+        return f"{color}{robot_char}{Colors.RESET}"
+    
+    def _get_prediction_symbol(self, robot_id: int, step: int = 0) -> str:
+        """
+        Get symbol for predicted position - same number as robot, brighter white.
+        All predictions use brighter white.
+        
+        Args:
+            robot_id: Robot ID (0-9)
+            step: Step index (0-3, where 0 is next adjacent cell) - not used, kept for compatibility
+        
+        Returns:
+            Colored number string (same number, brighter white)
+        """
+        robot_char = str(robot_id % 10)
+        # Brighter white for predictions
+        color = '\033[97;1m'  # Bright white with bold
+        
+        return f"{color}{robot_char}{Colors.RESET}"
+    
+    def _update_position_history(self, spiral_id: int, new_pos: Tuple[int, int]):
+        """
+        Update position history for a spiral (keep last 4 positions).
+        
+        Args:
+            spiral_id: Spiral ID
+            new_pos: New position (row, col)
+        """
+        if spiral_id not in self.position_history:
+            self.position_history[spiral_id] = []
+        
+        history = self.position_history[spiral_id]
+        
+        # Add new position if it's different from the last one
+        if not history or history[-1] != new_pos:
+            history.append(new_pos)
+            # Keep only last max_history_size positions
+            if len(history) > self.max_history_size:
+                history.pop(0)
+    
+    def _update_predicted_paths(self):
+        """
+        Update predicted paths for all spirals.
+        Simple prediction: current position + movement direction = future positions.
+        Uses grid cell coordinates directly.
+        """
+        # Clear old predictions
+        self._clear_symbols_by_type('prediction_')
+        self.predicted_paths.clear()
+        
+        try:
+            # For each spiral with history, predict future positions
+            for spiral_id, history in self.position_history.items():
+                if len(history) < 2:
+                    continue  # Need at least 2 positions for prediction
+                
+                # Get current and previous positions (grid cell coordinates)
+                current_pos = history[-1]  # (row, col)
+                prev_pos = history[-2]     # (row, col)
+                
+                # Calculate movement direction (simple: current - previous)
+                dr = current_pos[0] - prev_pos[0]  # Row change
+                dc = current_pos[1] - prev_pos[1]  # Col change
+                
+                # If no movement, don't predict
+                if dr == 0 and dc == 0:
+                    continue
+                
+                # Predict future positions by continuing in the same direction
+                predicted = []
+                for step in range(1, self.prediction_steps + 1):
+                    pred_row = current_pos[0] + dr * step
+                    pred_col = current_pos[1] + dc * step
+                    
+                    # Check bounds
+                    if 0 <= pred_row < len(self.grid) and 0 <= pred_col < len(self.grid[0]):
+                        predicted.append((int(pred_row), int(pred_col)))
+                    else:
+                        break  # Stop if we hit a boundary
+                
+                if predicted:
+                    self.predicted_paths[spiral_id] = predicted
+        except Exception as e:
+            # Debug: print error if prediction fails
+            print(f"Prediction error: {e}")
+            pass
+    
+    def _is_spiral_near_others(self, spiral_id: int) -> bool:
+        """
+        Check if a spiral is near other spirals (within proximity threshold).
+        """
+        if spiral_id not in self.robot_positions:
+            return False
+        
+        current_pos = self.robot_positions[spiral_id]
+        
+        # Check proximity to other spirals
+        for other_id, other_pos in self.robot_positions.items():
+            if other_id == spiral_id:
+                continue
+            
+            # Calculate Manhattan distance
+            distance = abs(current_pos[0] - other_pos[0]) + abs(current_pos[1] - other_pos[1])
+            if distance <= self.proximity_threshold:
+                return True
+        
+        return False
+    
+    def _display_history_and_predictions(self):
+        """
+        Display position history and predicted paths on the grid.
+        Context-aware: Shows more details when spirals are near others.
+        Shows same robot number with different colors: darker for history, lighter for predictions.
+        """
+        # Clear old history and prediction symbols
+        self._clear_symbols_by_type('history_')
+        
+        # Display history positions (same number as robot, darker color)
+        for spiral_id, history in self.position_history.items():
+            if len(history) == 0:
+                continue
+            
+            # Determine how much history to show based on context
+            is_near = self._is_spiral_near_others(spiral_id)
+            history_to_show = self.max_history_size if is_near else self.min_history_display
+            
+            # Show history positions
+            for age, pos in enumerate(reversed(history[-history_to_show:])):
+                if age < history_to_show:
+                    history_symbol = self._get_history_symbol(spiral_id, age)
+                    self._add_temporary_symbol(pos[0], pos[1], history_symbol, f'history_{age}')
+        
+        # Display predicted paths (same number as robot, lighter color)
+        for spiral_id, predicted in self.predicted_paths.items():
+            if len(predicted) == 0:
+                continue
+            
+            # Determine how many predictions to show based on context
+            is_near = self._is_spiral_near_others(spiral_id)
+            predictions_to_show = self.prediction_steps if is_near else self.min_prediction_display
+            
+            for step, pos in enumerate(predicted):
+                if step < predictions_to_show:
+                    prediction_symbol = self._get_prediction_symbol(spiral_id, step)
+                    self._add_temporary_symbol(pos[0], pos[1], prediction_symbol, f'prediction_{step}')
     
     def update_robot_positions(self) -> bool:
         """Update all robot positions from ROS2 API and convert to grid cells."""
@@ -277,67 +485,77 @@ class HandGridDemo:
         if current_time - self.last_robot_update < self.robot_update_interval:
             return False
         
-        # Hämta alla robotpositioner från ROS2 API
-        all_positions = self.robot_api.getPosition()  # None = alla robotar
+        # Hämta alla robotpositioner från ROS2 API (alla spirals individuellt)
+        all_positions = self.robot_api.getPosition()  # None = alla robotar/spirals
         self.last_robot_update = current_time
         
-        # Skapa set med nuvarande aktiva robotar
-        current_robot_ids = {pos.id for pos in all_positions}
+        # Skapa set med nuvarande aktiva spirals
+        current_spiral_ids = {pos.id for pos in all_positions}
         old_robot_positions = self.robot_positions.copy()
         
         changed = False
         
-        # Uppdatera eller lägg till robotar
+        # Uppdatera eller lägg till spirals
         for position in all_positions:
-            robot_id = position.id
-            old_pos = old_robot_positions.get(robot_id)
+            spiral_id = position.id
+            old_pos = old_robot_positions.get(spiral_id)
             
             # Transformera GPS-koordinater till grid cell (robotar är på golvet, ingen höjdoffset)
-            # OBS: SpiralRow.row och SpiralRow.col kan vara ombytta eller i annat koordinatsystem
             try:
-                # Testa olika kombinationer för att hitta rätt mapping
-                # Först: använd col som X och row som Y (GPS koordinatsystem)
                 cell = self.overlay.get_grid_cell(
                     int(position.col),  # X-koordinat från GPS
                     int(position.row)   # Y-koordinat från GPS
                 )
                 
                 if not cell["in_bounds"]:
-                    # Robot utanför grid - ta bort från grid
+                    # Spiral utanför grid - ta bort från grid
                     if old_pos is not None:
-                        self._remove_temporary_symbol(old_pos[0], old_pos[1])
-                        del self.robot_positions[robot_id]
+                        self._remove_temporary_symbol(old_pos[0], old_pos[1], 'robot')
+                        del self.robot_positions[spiral_id]
+                        if spiral_id in self.position_history:
+                            del self.position_history[spiral_id]
                         changed = True
                     continue
                 
                 new_pos = (cell["row"], cell["col"])
                 
+                # Update position history
+                self._update_position_history(spiral_id, new_pos)
+                
                 if old_pos == new_pos:
-                    # Samma position - ingen ändring
+                    # Samma position - ingen ändring för robot symbol
                     continue
                 
-                # Robot har flyttat sig eller är ny
-                robot_symbol = self._get_robot_symbol(robot_id)
+                # Spiral har flyttat sig eller är ny
+                robot_symbol = self._get_robot_symbol(spiral_id)
                 
                 if old_pos is None:
-                    # Ny robot - lägg till symbol
-                    self._add_temporary_symbol(new_pos[0], new_pos[1], robot_symbol)
+                    # Ny spiral - lägg till symbol
+                    self._add_temporary_symbol(new_pos[0], new_pos[1], robot_symbol, 'robot')
                 else:
-                    # Robot flyttat - flytta symbol
+                    # Spiral flyttat - flytta symbol
                     self._move_temporary_symbol(old_pos[0], old_pos[1], new_pos[0], new_pos[1])
                 
-                self.robot_positions[robot_id] = new_pos
+                self.robot_positions[spiral_id] = new_pos
                 changed = True
             except Exception:
-                # Om transformation misslyckas, hoppa över denna robot
+                # Om transformation misslyckas, hoppa över denna spiral
                 continue
         
-        # Ta bort robotar som inte längre är aktiva
-        for robot_id, old_pos in old_robot_positions.items():
-            if robot_id not in current_robot_ids:
-                self._remove_temporary_symbol(old_pos[0], old_pos[1])
-                del self.robot_positions[robot_id]
+        # Ta bort spirals som inte längre är aktiva
+        for spiral_id, old_pos in old_robot_positions.items():
+            if spiral_id not in current_spiral_ids:
+                self._remove_temporary_symbol(old_pos[0], old_pos[1], 'robot')
+                del self.robot_positions[spiral_id]
+                if spiral_id in self.position_history:
+                    del self.position_history[spiral_id]
                 changed = True
+        
+        # Update predicted paths
+        self._update_predicted_paths()
+        
+        # Display history and predictions
+        self._display_history_and_predictions()
         
         return changed
     
@@ -364,8 +582,8 @@ class HandGridDemo:
                 if self.hand_position == pos and self.hand_gesture:
                     symbol = get_symbol('FOOD' if self.hand_gesture == "FOOD" else 'THREAT')
                 elif pos in self.temporary_symbols:
-                    # Temporary symbol (robot) replaces underlying symbol
-                    symbol, _ = self.temporary_symbols[pos]
+                    # Temporary symbol (robot, history, prediction) replaces underlying symbol
+                    symbol, _, _ = self.temporary_symbols[pos]
                 else:
                     symbol = map_data[row][col] if row < len(map_data) and col < len(map_data[row]) else "?"
                 print(symbol, end=" ")
@@ -374,12 +592,15 @@ class HandGridDemo:
         print("=" * (cols * 2 + 1))
         symbols = {k: get_symbol(k) for k in ['FREE', 'HOME', 'OBSTACLE', 'FOOD', 'THREAT']}
         print(f"Legend: {symbols['FREE']}=FREE {symbols['HOME']}=HOME {symbols['OBSTACLE']}=OBSTACLE "
-              f"{symbols['FOOD']}=Hand(Food) {symbols['THREAT']}=Hand(Threat) Yellow=Robot(ID)")
+              f"{symbols['FOOD']}=Hand(Food) {symbols['THREAT']}=Hand(Threat)")
+        print(f"Robots: {Colors.WHITE}0-9{Colors.RESET}=Current (white) | "
+              f"\033[37m0-9\033[0m=History (darker white) | "
+              f"\033[97;1m0-9\033[0m=Prediction (brighter white)")
         if self.hand_position:
             print(f"Hand: ({self.hand_position[0]}, {self.hand_position[1]})")
         if self.robot_positions:
-            robot_info = ", ".join([f"R{rid}({pos[0]},{pos[1]})" for rid, pos in sorted(self.robot_positions.items())])
-            print(f"Robots: {robot_info}")
+            robot_info = ", ".join([f"S{rid}({pos[0]},{pos[1]})" for rid, pos in sorted(self.robot_positions.items())])
+            print(f"Spirals: {robot_info}")
         print()
     
     def run(self):
@@ -408,7 +629,7 @@ class HandGridDemo:
             pass
         finally:
             # Cleanup: remove all temporary symbols
-            for pos in list(self.temporary_symbols.keys()):
+            for pos in self.temporary_symbols.keys():
                 self._remove_temporary_symbol(pos[0], pos[1])
             self.recognizer.stop()
             self.robot_api.stop()

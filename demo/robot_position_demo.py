@@ -52,16 +52,16 @@ def main():
         position = api.getPosition(9)  # <-- Detta är allt du behöver!
         
         if position:
-            print(f"\n✓ Spiral 9 hittad!")
+            print("\n✓ Spiral 9 hittad!")
             print(f"  Position: ({position.row:.2f}, {position.col:.2f})")
             print(f"  Vinkel: {position.angle:.2f}")
             print(f"  Certainty: {position.certainty:.2f}")
         else:
-            print(f"\n⚠ Spiral 9 hittades inte ännu.")
+            print("\n⚠ Spiral 9 hittades inte ännu.")
             print("  Kontrollera att GPS-servern körs och skickar data.")
         
         # Kontinuerlig tracking
-        print(f"\n--- Kontinuerlig tracking av Spiral 9 ---")
+        print("\n--- Kontinuerlig tracking av Spiral 9 ---")
         print("Uppdaterar position var 2:e sekund. Tryck Ctrl+C för att stoppa.\n")
         
         update_count = 0

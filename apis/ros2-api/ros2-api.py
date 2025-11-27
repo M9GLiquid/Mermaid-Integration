@@ -13,29 +13,14 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from std_msgs.msg import Float32MultiArray
 
-# Importera SpiralRow från ros2.py i samma mapp
 import sys
-import os
-import importlib.util
+from pathlib import Path
 
-# Försök importera från samma mapp först
-ros2_path = os.path.join(os.path.dirname(__file__), "ros2.py")
-if os.path.exists(ros2_path):
-    spec = importlib.util.spec_from_file_location("ros2_api_ros2", ros2_path)
-    ros2_module = importlib.util.module_from_spec(spec)
-    # Registrera modulen i sys.modules för att undvika problem med dataclass
-    sys.modules["ros2_api_ros2"] = ros2_module
-    spec.loader.exec_module(ros2_module)
-    SpiralRow = ros2_module.SpiralRow
-else:
-    # Fallback: försök från parent directory
-    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if parent_dir not in sys.path:
-        sys.path.insert(0, parent_dir)
-    try:
-        from ros2 import SpiralRow
-    except ImportError:
-        raise ImportError("Could not find ros2.py. Make sure ros2.py is in the same directory as ros2-api.py")
+# Lägg till nuvarande katalog så ros2.py hittas när skriptet körs direkt
+_ros2_api_dir = Path(__file__).parent
+if str(_ros2_api_dir) not in sys.path:
+    sys.path.insert(0, str(_ros2_api_dir))
+from ros2 import SpiralRow
 
 
 class MessageParser:

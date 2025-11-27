@@ -6,17 +6,17 @@ Minimal integration package that connects three APIs for hand recognition with g
 
 This integration follows SoC principles with three independent APIs:
 
-1. **Hand Recognition API** (`hand_recognition/hand-recognition-api.py`)
+1. **Hand Recognition API** (`apis/hand-recognition-api/hand-recognition-api.py`)
    - Detects hand gestures (Open_Palm, Closed_Fist)
    - Provides hand position coordinates from camera stream
    - Uses MediaPipe for gesture recognition
 
-2. **Overlay API** (`overlay/overlay-api.py`)
+2. **Overlay API** (`apis/overlay-api/overlay-api.py`)
    - Transforms coordinates: GPS server → Rectified → Grid cells
    - Handles perspective correction and grid overlay
    - Provides coordinate transformation functions
 
-3. **Layout API** (`object-layout/api/layout-api.py`)
+3. **Layout API** (`apis/layout-api/layout-api.py`)
    - Manages grid map (walls, home positions, obstacles)
    - Provides colored symbol display
    - Handles grid persistence and access
@@ -24,51 +24,35 @@ This integration follows SoC principles with three independent APIs:
 ## Structure
 
 ```
-Integration-v1/
+Mermaid-Integration/
 ├── main.py                    # Main orchestrator (connects all APIs)
 ├── demo/
 │   └── hand_grid_demo.py     # Demo implementation
-├── apis/                      # Git submodules (API repositories)
-│   ├── overlay-api/          # Overlay API submodule
+├── apis/                      # API repositories
+│   ├── overlay-api/          # Overlay API
 │   │   ├── overlay-api.py
 │   │   └── gps_overlay.json
-│   ├── layout-api/           # Layout API submodule
+│   ├── layout-api/           # Layout API
 │   │   ├── layout-api.py
 │   │   └── grid.json
-│   └── hand-recognition-api/ # Hand Recognition API submodule
-│       ├── hand-recognition-api.py
-│       └── gesture_recognizer.task
+│   ├── hand-recognition-api/ # Hand Recognition API
+│   │   ├── hand-recognition-api.py
+│   │   └── gesture_recognizer.task
+│   ├── ros2-api/             # ROS2 Position API
+│   │   ├── ros2-api.py
+│   │   └── ros2.py
 └── ...
 ```
 
-**Note:** APIs are managed as Git submodules. See [Setup](#setup) for initialization instructions.
+**Note:** APIs are now vendored directly in `apis/`; no submodules required.
 
 ## Setup
 
-### Initial Setup
-
-Clone the repository and initialize submodules:
+Clone the repository:
 
 ```bash
 git clone <repository-url> Integration-v1
 cd Integration-v1
-git submodule update --init --recursive
-```
-
-### Updating APIs
-
-To update APIs to their latest versions:
-
-```bash
-git submodule update --remote
-```
-
-To update a specific API:
-
-```bash
-cd apis/overlay-api
-git pull origin main
-cd ../..
 ```
 
 ## Usage
@@ -135,11 +119,10 @@ Scriptet gör:
 ## Standalone
 
 This package is completely standalone:
-- All APIs are self-contained Git submodules
+- APIs are vendored in `apis/`
 - No dependencies on other Mermaid projects
 - Can be cloned and used independently
-- Each API submodule can be updated independently
-- Each module can be replaced without affecting others
+- Each module can be swapped without affecting others
 
 ## API Independence
 
