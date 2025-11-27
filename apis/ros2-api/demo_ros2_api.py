@@ -20,6 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Importera från ros2-api modulen (filnamnet har bindestreck)
 ros2_api_path = os.path.join(os.path.dirname(__file__), "ros2-api.py")
 spec = importlib.util.spec_from_file_location("ros2_api", ros2_api_path)
+if spec is None or spec.loader is None:
+    raise ImportError(f"Kunde inte läsa in ros2_api-modulen från {ros2_api_path}")
 ros2_api = importlib.util.module_from_spec(spec)
 # Registrera modulen i sys.modules för att undvika problem med dataclass
 sys.modules["ros2_api"] = ros2_api
