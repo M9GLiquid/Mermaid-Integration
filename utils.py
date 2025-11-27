@@ -38,7 +38,7 @@ def load_module(file_path: Path, module_name: str) -> Any:
     return module
 
 
-def import_api(api_path: Path, module_name: str, error_msg: str = None) -> Any:
+def import_api(api_path: Path, module_name: str, error_msg: Optional[str] = None) -> Any:
     """
     Import an API module with error handling.
     

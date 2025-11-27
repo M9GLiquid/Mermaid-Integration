@@ -46,46 +46,46 @@ Mermaid-Integration/
 
 **Note:** APIs are now vendored directly in `apis/`; no submodules required.
 
-## Setup
-
-Clone the repository:
+## Quick Start (from clone to run)
 
 ```bash
-git clone <repository-url> Integration-v1
-cd Integration-v1
-```
+# 1) Clone
+git clone <repository-url> Mermaid-Integration
+cd Mermaid-Integration
 
-## Usage
+# 2) (Optional but recommended) Activate shared env + ROS2 setup
+# This repo expects the shared setup script one level up (../setup_env.sh)
+source ../setup_env.sh
 
-Run the integration:
+# 3) Install python deps (skip if setup_env already handled it)
+pip install -r requirements.txt
 
-```bash
+# 4) Run the integration demo
 python3 main.py
+
+# 5) Run API tests
+python3 run_tests.py
 ```
 
-The integration will:
-1. Initialize all three APIs
-2. Start hand recognition from camera stream
-3. Transform hand coordinates to grid cells
-4. Update grid based on gestures (in memory only)
-5. Display grid with colored symbols in terminal
+What main.py does:
+1. Initializes all vendored APIs.
+2. Starts hand recognition from camera stream.
+3. Transforms hand coordinates to grid cells.
+4. Updates grid based on gestures (in memory only).
+5. Prints the grid with colored symbols in the terminal.
 
-## Testing
+## Demos & Tests
 
-Test the APIs individually:
-
-```bash
-# Test Layout API
-python3 test_layout_api.py
-
-# Test Overlay API
-python3 test_overlay_api.py
-
-# Test specific overlay functionality
-python3 test_overlay_api.py test_coordinates
-python3 test_overlay_api.py test_grid_cells
-python3 test_overlay_api.py test_stream_transform
-```
+- Full integration: `python3 main.py`
+- Hand+grid demo: `python3 demo/hand_grid_demo.py`
+- Robot position demo (needs ROS2 publisher): `python3 demo/robot_position_demo.py`
+- All tests: `python3 run_tests.py`
+- Individual tests:
+  - `python3 test_layout_api.py`
+  - `python3 test_overlay_api.py`
+  - `python3 test_overlay_api.py test_coordinates`
+  - `python3 test_overlay_api.py test_grid_cells`
+  - `python3 test_overlay_api.py test_stream_transform`
 
 ## Gestures
 
@@ -103,32 +103,35 @@ python3 test_overlay_api.py test_stream_transform
 
 ## Environment Setup
 
-**VIKTIGT**: Aktivera environment innan du kör programmet!
+`setup_env.sh` (one directory above this repo) activates:
+- ROS2 Jazzy environment
+- Python venv at `../Python/.venv`
+- Installs `requirements.txt` on first run if needed
+
+If you do not have ROS2, you can still run layout/overlay/hand tests; ROS2-dependent demos require a sourced ROS2 environment.
+
+## Updating vendored APIs (git subtree)
+
+APIs are vendored (no submodules). To pull upstream changes (from the local sibling repos used here), run:
 
 ```bash
-cd Integration-v1
-source ../setup_env.sh  # Aktiverar ROS2 Jazzy + venv automatiskt
-python3 main.py
+# Layout API (from Mermaid-Layout/api)
+git subtree pull --prefix=apis/layout-api /home/thomas/Dev/Python/Mermaid-Layout export-api --squash
+
+# Overlay API (from Mermaid-Overlay/api)
+git subtree pull --prefix=apis/overlay-api /home/thomas/Dev/Python/Mermaid-Overlay export-api --squash
+
+# Hand Recognition API (from Mermaid-Interaction/hand-recognition)
+git subtree pull --prefix=apis/hand-recognition-api /home/thomas/Dev/Python/Mermaid-Interaction export-hand --squash
+
+# ROS2 Position API (from Mermaid-Ros2-Comm/api)
+git subtree pull --prefix=apis/ros2-api /home/thomas/Dev/Python/Mermaid-Ros2-Comm export-api --squash
 ```
 
-Scriptet gör:
-- ✅ Aktiverar ROS2 Jazzy
-- ✅ Aktiverar venv från `Python/.venv`
-- ✅ Installerar requirements automatiskt om de saknas
+If you’re cloning this somewhere else, replace the `/home/thomas/Dev/...` paths with the appropriate remote URLs or local paths for your upstreams.
 
-## Standalone
+## Standalone & API Independence
 
-This package is completely standalone:
-- APIs are vendored in `apis/`
-- No dependencies on other Mermaid projects
-- Can be cloned and used independently
-- Each module can be swapped without affecting others
-
-## API Independence
-
-Each API is independent and can be replaced:
-- **Hand Recognition**: Replace `hand-recognition-api.py` with different recognition system
-- **Overlay**: Replace `overlay-api.py` with different coordinate transformation
-- **Layout**: Replace `layout-api.py` with different grid management
-
-The `main.py` orchestrator connects all three APIs together following SoC principles.
+- APIs are included in `apis/` — no submodules required.
+- You can swap any API by replacing its files under `apis/<name>-api/`.
+- Each API remains independent; `main.py` simply orchestrates them together.

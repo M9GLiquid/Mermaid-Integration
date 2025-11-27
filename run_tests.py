@@ -11,9 +11,10 @@ Usage:
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 
-def run_test(test_file: str, test_name: str = None) -> tuple[bool, str]:
+def run_test(test_file: str, test_name: Optional[str] = None) -> tuple[bool, str]:
     """
     Run a test file and return success status and output.
     
