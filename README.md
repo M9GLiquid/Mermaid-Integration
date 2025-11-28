@@ -1,25 +1,33 @@
 # Integration-v1
 
-Minimal integration package that connects three APIs for hand recognition with grid layout management.
+Minimal integration package that connects four APIs for hand recognition with grid layout management.
 
 ## Architecture (Separation of Concerns)
 
-This integration follows SoC principles with three independent APIs:
+This integration follows SoC principles with four independent APIs:
 
 1. **Hand Recognition API** (`apis/hand-recognition-api/hand-recognition-api.py`)
+
    - Detects hand gestures (Open_Palm, Closed_Fist)
    - Provides hand position coordinates from camera stream
    - Uses MediaPipe for gesture recognition
 
 2. **Overlay API** (`apis/overlay-api/overlay-api.py`)
+
    - Transforms coordinates: GPS server → Rectified → Grid cells
    - Handles perspective correction and grid overlay
    - Provides coordinate transformation functions
 
 3. **Layout API** (`apis/layout-api/layout-api.py`)
+
    - Manages grid map (walls, home positions, obstacles)
    - Provides colored symbol display
    - Handles grid persistence and access
+
+4. **A\* Pathfinding API** (`apis/astar-api/astar-api.py`)
+   - Searches for a path from robot start to FOOD/HOME tiles (3x3 robot)
+   - Generates next robot action + ASCII command encoding
+   - Includes helpers for grid parsing/visualization
 
 ## Structure
 
@@ -29,18 +37,11 @@ Mermaid-Integration/
 ├── demo/
 │   └── hand_grid_demo.py     # Demo implementation
 ├── apis/                      # API repositories
+│   ├── astar-api/            # A* pathfinding API
 │   ├── overlay-api/          # Overlay API
-│   │   ├── overlay-api.py
-│   │   └── gps_overlay.json
 │   ├── layout-api/           # Layout API
-│   │   ├── layout-api.py
-│   │   └── grid.json
 │   ├── hand-recognition-api/ # Hand Recognition API
-│   │   ├── hand-recognition-api.py
-│   │   └── gesture_recognizer.task
 │   ├── ros2-api/             # ROS2 Position API
-│   │   ├── ros2-api.py
-│   │   └── ros2.py
 └── ...
 ```
 
@@ -68,6 +69,7 @@ python3 run_tests.py
 ```
 
 What main.py does:
+
 1. Initializes all vendored APIs.
 2. Starts hand recognition from camera stream.
 3. Transforms hand coordinates to grid cells.
@@ -104,6 +106,7 @@ What main.py does:
 ## Environment Setup
 
 `setup_env.sh` (one directory above this repo) activates:
+
 - ROS2 Jazzy environment
 - Python venv at `../Python/.venv`
 - Installs `requirements.txt` on first run if needed
@@ -126,6 +129,9 @@ git subtree pull --prefix=apis/hand-recognition-api /home/thomas/Dev/Python/Merm
 
 # ROS2 Position API (from Mermaid-Ros2-Comm/api)
 git subtree pull --prefix=apis/ros2-api /home/thomas/Dev/Python/Mermaid-Ros2-Comm export-api --squash
+
+# A* Pathfinding API (from Mermaid-Astar/api)
+git subtree pull --prefix=apis/astar-api /home/thomas/Dev/Python/Mermaid-Astar export-api --squash
 ```
 
 If you’re cloning this somewhere else, replace the `/home/thomas/Dev/...` paths with the appropriate remote URLs or local paths for your upstreams.

@@ -27,6 +27,7 @@ integration_root = Path(__file__).parent
 sys.path.insert(0, str(integration_root / "apis" / "overlay-api"))
 sys.path.insert(0, str(integration_root / "apis" / "layout-api"))
 sys.path.insert(0, str(integration_root / "apis" / "hand-recognition-api"))
+sys.path.insert(0, str(integration_root / "apis" / "ros2-api"))
 sys.path.insert(0, str(integration_root))
 
 # Import APIs using simplified utility functions (vendored)
@@ -57,11 +58,19 @@ RobotPositionAPI = ros2_api.RobotPositionAPI
 SpiralRow = ros2_api.SpiralRow
 
 Grid = List[List[int]]
-GESTURE_TO_CELL = {"FOOD": HOME, "THREAT": OBSTACLE}
+# Map gesture strings to grid values (support both semantic and raw gesture names)
+GESTURE_TO_CELL = {
+    "FOOD": HOME,
+    "PALM": HOME,
+    "OPEN_PALM": HOME,
+    "THREAT": OBSTACLE,
+    "FIST": OBSTACLE,
+    "CLOSED_FIST": OBSTACLE,
+}
 
 # Hand recognition (Interaction code vendored locally)
 hand_recognition_api = import_api(
-    integration_root / "apis" / "hand-recognition-api" / "hand-recognition-api.py",
+    integration_root / "apis" / "hand-recognition-api" / "interaction-api.py",
     "hand_recognition_api",
     "hand-recognition-api not found; ensure apis/hand-recognition-api exists"
 )
@@ -89,7 +98,7 @@ class HandGridDemo:
         self.robot_api = RobotPositionAPI(
             topic='robotPositions',
             msg_type='string',
-            min_certainty=0.25,
+            min_certainty=0.35,
             max_speed=500.0
         )
         self.robot_api.start()
@@ -216,17 +225,20 @@ class HandGridDemo:
         self.hand_position, self.hand_gesture = new_pos, gesture
         
         # Apply gesture to grid
-        if gesture in GESTURE_TO_CELL:
+        gesture_key = (gesture or "").upper()
+        self.hand_position, self.hand_gesture = new_pos, gesture_key or None
+
+        if gesture_key in GESTURE_TO_CELL:
             is_new = self.last_gesture_cell != new_pos
-            gesture_changed = self.last_gesture_type != gesture
+            gesture_changed = self.last_gesture_type != gesture_key
             current_value = self.grid[row][col] if (row < len(self.grid) and col < len(self.grid[0])) else FREE
             
             if (is_new and current_value == FREE) or (not is_new and gesture_changed):
                 if not is_new and time.time() - self.last_update_time < self.update_cooldown:
                     return changed
                 
-                if self._update_cell(row, col, GESTURE_TO_CELL[gesture]):
-                    self.last_gesture_cell, self.last_gesture_type = new_pos, gesture
+                if self._update_cell(row, col, GESTURE_TO_CELL[gesture_key]):
+                    self.last_gesture_cell, self.last_gesture_type = new_pos, gesture_key
                     self.last_update_time = time.time()
                     changed = True
         
@@ -319,13 +331,21 @@ class HandGridDemo:
         print("=" * (cols * 2 + 1))
         print("  " + " ".join(str(i % 10) for i in range(cols)))
         
+        hand_symbol_key = None
+        if self.hand_gesture:
+            mapped = GESTURE_TO_CELL.get(self.hand_gesture)
+            if mapped == HOME:
+                hand_symbol_key = 'FOOD'
+            elif mapped == OBSTACLE:
+                hand_symbol_key = 'THREAT'
+
         for row in range(rows):
             print(f"{row % 10} ", end="")
             for col in range(cols):
                 pos = (row, col)
                 # Prioritera: Hand > Temporary symbols (robots, history) > Grid
-                if self.hand_position == pos and self.hand_gesture:
-                    symbol = get_symbol('FOOD' if self.hand_gesture == "FOOD" else 'THREAT')
+                if self.hand_position == pos and hand_symbol_key:
+                    symbol = get_symbol(hand_symbol_key)
                 elif pos in self.temporary_symbols:
                     # Temporary symbol (robot, history) replaces underlying symbol
                     symbol, _, _ = self.temporary_symbols[pos]

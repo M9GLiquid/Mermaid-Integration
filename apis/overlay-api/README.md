@@ -4,7 +4,7 @@ This folder contains everything you need to use the GPSOverlay API in your proje
 
 ## Files
 
-- `overlay.py` - The API code (no external dependencies)
+- `overlay-api.py` - The API code (no external dependencies)
 - `gps_overlay.json` - Calibration data (created by Tool 8)
 
 ## Quick Start
@@ -13,7 +13,14 @@ This folder contains everything you need to use the GPSOverlay API in your proje
 2. Import and use:
 
 ```python
-from overlay import GPSOverlay
+from importlib import util
+from pathlib import Path
+
+overlay_path = Path("overlay-api.py")
+spec = util.spec_from_file_location("overlay_api", overlay_path)
+overlay_api = util.module_from_spec(spec)
+spec.loader.exec_module(overlay_api)  # type: ignore[arg-type]
+GPSOverlay = overlay_api.GPSOverlay
 
 # Initialize (auto-detects gps_overlay.json in same directory)
 overlay = GPSOverlay()

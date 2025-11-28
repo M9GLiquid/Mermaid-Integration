@@ -119,6 +119,37 @@ class GPSOverlay:
             # Real-world calibration not available - set to None
             self.mm_per_pixel_x = self.mm_per_pixel_y = None
 
+        # Optional: camera pose assumptions for height correction
+        camera_cfg = self.data.get("camera", {})
+        self.camera_height_mm: Optional[float] = camera_cfg.get("height_mm")
+        # Assumed tilt (pitch) in degrees; positive = camera looking toward grid top (negative row direction)
+        self.camera_tilt_pitch_deg: float = float(camera_cfg.get("tilt_pitch_deg", 0.0))
+        # Optional attenuation factor for tilt compensation to avoid over-shift
+        self.camera_tilt_scale: float = float(camera_cfg.get("tilt_scale", 0.25))
+        # Cache for rectified principal point (camera center projected to rectified plane)
+        self._principal_point_rect: Optional[Tuple[float, float]] = None
+
+    def _get_principal_point_rectified(self) -> Optional[Tuple[float, float]]:
+        """
+        Project the camera principal point to rectified space (cached).
+        Returns None if unavailable.
+        """
+        if self._principal_point_rect is not None:
+            return self._principal_point_rect
+
+        try:
+            cx = float(self.data["camera_matrix"][0][2])
+            cy = float(self.data["camera_matrix"][1][2])
+        except Exception:
+            return None
+
+        x_rect, y_rect = self.map_coords(cx, cy)
+        if math.isnan(x_rect) or math.isnan(y_rect):
+            return None
+
+        self._principal_point_rect = (x_rect, y_rect)
+        return self._principal_point_rect
+
     def map_coords(self, x: float, y: float) -> Tuple[float, float]:
         """
         Transform GPS server coordinates to rectified canvas coordinates.
@@ -194,6 +225,33 @@ class GPSOverlay:
         # Return normalized coordinates
         return x_rect / w, y_rect / w
 
+    def _apply_soft_clamp_x(self, x_rect: float) -> float:
+        """
+        Compress the right-most 40% of the arena so X advances slower past 60%.
+
+        Keeps 0–60% untouched, then eases the remaining span to delay reaching
+        the far-right columns unless the hand truly approaches the edge.
+        """
+        left = self.arena_bounds["left"]
+        right = self.arena_bounds["right"]
+        width = right - left
+        if width <= 0:
+            return x_rect
+
+        x_norm = (x_rect - left) / width  # 0..1 across arena width
+        clamp_start = 0.6
+        if x_norm <= clamp_start:
+            return x_rect
+
+        # Ease-out compression on the final 40%
+        remaining = 1.0 - clamp_start
+        t = min(1.0, (x_norm - clamp_start) / remaining)  # 0..1
+        k = 2.0  # larger k = stronger slowdown
+        eased = 1.0 - math.exp(-k * t)
+        eased /= 1.0 - math.exp(-k)  # normalize to 0..1
+        x_remapped = clamp_start + eased * remaining
+        return left + x_remapped * width
+
     def get_grid_cell(self, x: float, y: float) -> Dict:
         """
         Transform GPS server coordinates to grid cell position.
@@ -223,6 +281,7 @@ class GPSOverlay:
                 print(f"Cell center: ({cell['center_x']:.1f}, {cell['center_y']:.1f})")
         """
         x_rect, y_rect = self.map_coords(x, y)
+        x_rect = self._apply_soft_clamp_x(x_rect)
 
         if math.isnan(x_rect) or math.isnan(y_rect):
             return {"col": 0, "row": 0, "in_bounds": False, "center_x": 0, "center_y": 0}
@@ -258,7 +317,7 @@ class GPSOverlay:
         Get grid cell position with height offset correction.
         
         Corrects for objects above the arena floor (e.g., hand 1m above floor).
-        Uses perspective projection geometry to calculate position-dependent offset.
+        Uses either a calibrated camera height (preferred) or a heuristic fallback.
         
         Args:
             x: GPS server X coordinate (typically 0-2048)
@@ -275,23 +334,66 @@ class GPSOverlay:
             if cell["in_bounds"]:
                 print(f"Hand is in cell ({cell['col']}, {cell['row']})")
         """
-        # Get apparent position (without height correction)
-        cell_info = self.get_grid_cell(x, y)
+        # Map to rectified space first
+        x_rect, y_rect = self.map_coords(x, y)
+        if math.isnan(x_rect) or math.isnan(y_rect):
+            return {"col": 0, "row": 0, "in_bounds": False, "center_x": 0, "center_y": 0}
+
+        # Apparent grid cell without correction
+        cell_info = self.get_grid_cell_from_rectified(x_rect, y_rect)
         if not cell_info["in_bounds"]:
             return cell_info
-        
+
+        # If we don't have a camera height, fall back to the old heuristic
+        if self.camera_height_mm is None or height_mm <= 0 or height_mm >= self.camera_height_mm:
+            return self._get_grid_cell_with_height_heuristic(cell_info, height_mm)
+
+        # Compute principal point in rectified space; if unavailable, fall back
+        pp_rect = self._get_principal_point_rectified()
+        if pp_rect is None:
+            return self._get_grid_cell_with_height_heuristic(cell_info, height_mm)
+
+        # Simple pinhole model assuming nadir camera:
+        # Elevated point appears radially farther from principal point.
+        # Scale vector toward principal point by (H - h) / H to drop to floor.
+        cam_h = self.camera_height_mm
+        scale = (cam_h - height_mm) / cam_h
+        px, py = pp_rect
+        x_floor = px + scale * (x_rect - px)
+        y_floor = py + scale * (y_rect - py)
+
+        # Apply small tilt compensation along grid columns (toward right side = positive X)
+        if self.camera_tilt_pitch_deg != 0 and self.real_world_available and self.mm_per_pixel_x not in (None, 0):
+            pitch_rad = math.radians(self.camera_tilt_pitch_deg)
+            arena_width = self.arena_bounds["right"] - self.arena_bounds["left"]
+            if arena_width != 0:
+                norm_x = (x_rect - px) / arena_width
+                # Only apply on the camera-away side (positive norm_x = right side); leave left side untouched
+                if norm_x > 0:
+                    norm_x = min(1.0, norm_x)
+                    tilt_offset_px = norm_x * (height_mm * math.tan(pitch_rad)) / self.mm_per_pixel_x
+                    tilt_offset_px *= self.camera_tilt_scale
+                    x_floor -= tilt_offset_px
+
+        corrected_cell = self.get_grid_cell_from_rectified(x_floor, y_floor)
+        return corrected_cell
+
+    def _get_grid_cell_with_height_heuristic(self, cell_info: Dict, height_mm: float) -> Dict:
+        """
+        Legacy heuristic for height correction (kept as fallback when camera height is unknown).
+        """
         # If real-world calibration is not available, return uncorrected position
         if not self.real_world_available:
             return cell_info
-        
+
         row_apparent = cell_info["row"]
         col_apparent = cell_info["col"]
-        
+
         # Calculate offset using perspective projection
         # The homography matrix's [2][2] element relates to perspective scale
         h = self.homography
         perspective_scale = h[2][2]
-        
+
         # Estimate camera angle from perspective scale
         # This is a simplified model - assumes camera is looking down at an angle
         try:
@@ -299,10 +401,10 @@ class GPSOverlay:
         except (ValueError, TypeError):
             # Fallback if calculation fails
             return cell_info
-        
+
         # Calculate base offset in millimeters
         base_offset_mm = height_mm * math.tan(camera_angle_rad)
-        
+
         # Convert to pixels using real-world calibration
         mm_x = self.mm_per_pixel_x
         mm_y = self.mm_per_pixel_y
@@ -310,35 +412,35 @@ class GPSOverlay:
             return cell_info
         base_offset_x_px = base_offset_mm / mm_x
         base_offset_y_px = base_offset_mm / mm_y
-        
+
         # Grid cell dimensions
         left, top = self.arena_bounds["left"], self.arena_bounds["top"]
         right, bottom = self.arena_bounds["right"], self.arena_bounds["bottom"]
         cell_width = (right - left) / self.grid_cols
         cell_height = (bottom - top) / self.grid_rows
-        
+
         # Distance from center (normalized)
         center_row, center_col = self.grid_rows / 2.0, self.grid_cols / 2.0
         row_distance = (row_apparent - center_row) / max(center_row, 1.0)
         col_distance = (col_apparent - center_col) / max(center_col, 1.0)
-        
+
         # Apply position-dependent offset
         # Objects further from center appear more offset due to perspective
         row_offset = (base_offset_y_px / cell_height) * row_distance
         col_offset = -(base_offset_x_px / cell_width) * col_distance
-        
+
         # Calculate corrected cell position
         row_corrected = row_apparent - row_offset
         col_corrected = col_apparent - col_offset
-        
+
         # Clamp to valid grid bounds
         row_corrected = max(0, min(self.grid_rows - 1, row_corrected))
         col_corrected = max(0, min(self.grid_cols - 1, col_corrected))
-        
+
         # Calculate corrected cell center
         center_x = left + (int(col_corrected) + 0.5) * cell_width
         center_y = top + (int(row_corrected) + 0.5) * cell_height
-        
+
         return {
             "col": int(col_corrected),
             "row": int(row_corrected),
