@@ -14,8 +14,9 @@ Usage:
 
 import sys
 import time
+import threading
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 from utils import import_api, extract_attrs
@@ -28,6 +29,7 @@ sys.path.insert(0, str(integration_root / "apis" / "overlay-api"))
 sys.path.insert(0, str(integration_root / "apis" / "layout-api"))
 sys.path.insert(0, str(integration_root / "apis" / "hand-recognition-api"))
 sys.path.insert(0, str(integration_root / "apis" / "ros2-api"))
+sys.path.insert(0, str(integration_root / "apis" / "astar-api"))
 sys.path.insert(0, str(integration_root))
 
 # Import APIs using simplified utility functions (vendored)
@@ -76,6 +78,18 @@ hand_recognition_api = import_api(
 )
 GestureRecognizer = hand_recognition_api.GestureRecognizer
 
+astar_api = import_api(
+    integration_root / "apis" / "astar-api" / "astar-api.py",
+    "astar_api",
+    "astar-api not found; ensure apis/astar-api exists"
+)
+astar_search, next_action_from_path, encode_action_ascii = extract_attrs(
+    astar_api,
+    'search',
+    'next_action_from_path',
+    'encode_action_ascii'
+)
+
 
 class HandGridDemo:
     """Demo that integrates hand recognition and robot tracking with grid updates."""
@@ -114,6 +128,10 @@ class HandGridDemo:
         self.robot_positions: Dict[int, Tuple[int, int]] = {}  # spiral_id -> (row, col)
         self.last_robot_update = 0
         self.robot_update_interval = 0.5  # Uppdatera robotar var 0.5 sekund
+        self.robot_paths: Dict[int, Dict[str, Any]] = {}  # spiral_id -> path info
+        self.pathfinder_interval = 10.0  # seconds between pathfinding attempts
+        self._pathfinder_stop = threading.Event()
+        self._pathfinder_thread: Optional[threading.Thread] = None
         
         # Temporary symbols overlay (for robots)
         # Maps (row, col) -> (symbol, original_symbol, type)
@@ -124,6 +142,7 @@ class HandGridDemo:
         print(f"Gestures: Open_Palm→HOME ({get_symbol('HOME')}), Closed_Fist→OBSTACLE ({get_symbol('OBSTACLE')})")
         print("Robots: Tracking all active robots (0-9)")
         self._print_grid()
+        self._start_pathfinder()
     
     def _load_grid(self) -> Grid:
         """Load grid from file or create empty grid."""
@@ -315,6 +334,189 @@ class HandGridDemo:
                 changed = True
         
         return changed
+
+    def _start_pathfinder(self) -> None:
+        """Start background pathfinder thread that mocks routes to nearest home."""
+        if self._pathfinder_thread and self._pathfinder_thread.is_alive():
+            return
+        self._pathfinder_stop.clear()
+        self._pathfinder_thread = threading.Thread(
+            target=self._pathfinder_loop,
+            name="PathfinderLoop",
+            daemon=True,
+        )
+        self._pathfinder_thread.start()
+
+    def _stop_pathfinder(self) -> None:
+        """Signal pathfinder thread to stop and wait briefly."""
+        self._pathfinder_stop.set()
+        if self._pathfinder_thread:
+            self._pathfinder_thread.join(timeout=1.0)
+
+    def _pathfinder_loop(self) -> None:
+        """Periodically recompute mock paths for all detected robots."""
+        while not self._pathfinder_stop.is_set():
+            try:
+                self._update_robot_paths()
+            except Exception as exc:
+                # Keep loop alive even if path computation fails once
+                print(f"[Pathfinder] Error computing paths: {exc}")
+            self._pathfinder_stop.wait(self.pathfinder_interval)
+
+    def _update_robot_paths(self) -> None:
+        """Find mock paths for each robot to the nearest home tile."""
+        positions = dict(self.robot_positions)
+        if not positions:
+            if self.robot_paths:
+                self.robot_paths = {}
+                self._clear_path_symbols()
+            return
+
+        grid_snapshot = [row[:] for row in self.grid] if self.grid else []
+        if not grid_snapshot:
+            return
+
+        home_cells = self._collect_home_cells(grid_snapshot)
+        if not home_cells:
+            if self.robot_paths:
+                self.robot_paths = {}
+                self._clear_path_symbols()
+            return
+
+        new_paths: Dict[int, Dict[str, Any]] = {}
+        for robot_id, start_rc in positions.items():
+            plan = self._plan_robot_path(start_rc, grid_snapshot, home_cells)
+            if plan:
+                new_paths[robot_id] = plan
+
+        if new_paths != self.robot_paths:
+            self.robot_paths = new_paths
+            self._log_robot_paths(new_paths)
+            self._render_paths(new_paths)
+
+    def _collect_home_cells(self, grid_snapshot: Grid) -> List[Tuple[int, int]]:
+        """Return list of (row, col) cells marked as HOME."""
+        homes: List[Tuple[int, int]] = []
+        for row_idx, row in enumerate(grid_snapshot):
+            for col_idx, value in enumerate(row):
+                if value == HOME:
+                    homes.append((row_idx, col_idx))
+        return homes
+
+    def _prepare_astar_grid(
+        self,
+        grid_snapshot: Grid,
+        start_rc: Tuple[int, int],
+        goal_rc: Tuple[int, int]
+    ) -> Grid:
+        """Build a grid tailored for the astar API (start=2, goal=4)."""
+        prepared: Grid = []
+        for row_idx, row in enumerate(grid_snapshot):
+            new_row: List[int] = []
+            for col_idx, value in enumerate(row):
+                if (row_idx, col_idx) == start_rc:
+                    new_row.append(2)
+                elif (row_idx, col_idx) == goal_rc:
+                    new_row.append(4)
+                elif value == HOME:
+                    new_row.append(FREE)
+                else:
+                    new_row.append(value)
+            prepared.append(new_row)
+        return prepared
+
+    def _run_astar_search(self, astar_grid: Grid):
+        """
+        Run astar.search with tolerant unpacking (API returns 2 or 4 tuple values).
+        Returns (nodes, path, start, goal)
+        """
+        result = astar_search(astar_grid, goaltype="HOME")
+        nodes = 0
+        path = None
+        start_raw = None
+        goal_raw = None
+        if isinstance(result, tuple):
+            if len(result) >= 2:
+                nodes, path = result[0], result[1]
+            if len(result) >= 3:
+                start_raw = result[2]
+            if len(result) >= 4:
+                goal_raw = result[3]
+        return nodes, path, start_raw, goal_raw
+
+    def _plan_robot_path(
+        self,
+        start_rc: Tuple[int, int],
+        grid_snapshot: Grid,
+        home_cells: List[Tuple[int, int]]
+    ) -> Optional[Dict[str, Any]]:
+        """Select nearest home and compute a mock path + next action."""
+        sr, sc = start_rc
+        ordered_homes = sorted(
+            home_cells,
+            key=lambda h: abs(h[0] - sr) + abs(h[1] - sc)
+        )
+
+        for home_rc in ordered_homes:
+            astar_grid = self._prepare_astar_grid(grid_snapshot, start_rc, home_rc)
+            nodes, path, start_raw, goal_raw = self._run_astar_search(astar_grid)
+            if not path:
+                continue
+
+            path_list = list(path)
+            path_rc = [(y, x) for (x, y) in path_list]
+            next_action, _ = next_action_from_path(path_list, init_heading="N", allow_back=False)
+            return {
+                "target_home": home_rc,
+                "start": start_raw or (sc, sr),
+                "goal": goal_raw or (home_rc[1], home_rc[0]),
+                "path": path_rc,
+                "steps": max(len(path_rc) - 1, 0),
+                "nodes": nodes,
+                "next_action": next_action,
+                "next_action_ascii": encode_action_ascii(next_action)
+            }
+        return None
+
+    def _log_robot_paths(self, paths: Dict[int, Dict[str, Any]]) -> None:
+        """Print a lightweight summary of current mock robot paths."""
+        if not paths:
+            print("[Pathfinder] No robots to plan for.")
+            self._clear_path_symbols()
+            return
+
+        print("[Pathfinder] Updated robot routes:")
+        for rid, info in sorted(paths.items()):
+            target = info.get("target_home")
+            steps = info.get("steps", 0)
+            action = info.get("next_action_ascii", "STOP")
+            if target:
+                print(f"  Robot {rid} -> home ({target[0]},{target[1]}): steps={steps} next={action}")
+            else:
+                print(f"  Robot {rid}: no reachable home")
+        print()
+    
+    def _clear_path_symbols(self) -> None:
+        """Remove temporary path overlays."""
+        to_remove = [key for key, (_, _, typ) in self.temporary_symbols.items() if typ.startswith('path')]
+        for row, col in to_remove:
+            self._remove_temporary_symbol(row, col, 'path')
+
+    def _render_paths(self, paths: Dict[int, Dict[str, Any]]) -> None:
+        """Overlay current paths onto the printed grid."""
+        self._clear_path_symbols()
+        if not paths:
+            return
+
+        path_symbol = f"{Colors.CYAN}*{Colors.RESET}"
+        for info in paths.values():
+            path_cells = info.get("path", [])
+            for row, col in path_cells:
+                # Do not override robot markers
+                existing = self.temporary_symbols.get((row, col))
+                if existing and existing[2].startswith('robot'):
+                    continue
+                self._add_temporary_symbol(row, col, path_symbol, 'path')
     
     def _print_grid(self):
         """Print grid with hand position overlay."""
@@ -364,6 +566,17 @@ class HandGridDemo:
         if self.robot_positions:
             robot_info = ", ".join([f"S{rid}({pos[0]},{pos[1]})" for rid, pos in sorted(self.robot_positions.items())])
             print(f"Spirals: {robot_info}")
+        if self.robot_paths:
+            path_summaries = []
+            for rid, info in sorted(self.robot_paths.items()):
+                target = info.get("target_home")
+                steps = info.get("steps", 0)
+                action = info.get("next_action_ascii", "STOP")
+                if target:
+                    path_summaries.append(f"S{rid}->H({target[0]},{target[1]}): steps={steps} next={action}")
+                else:
+                    path_summaries.append(f"S{rid}: no path")
+            print("Paths: " + "; ".join(path_summaries))
         print()
     
     def run(self):
@@ -391,6 +604,7 @@ class HandGridDemo:
         except KeyboardInterrupt:
             pass
         finally:
+            self._stop_pathfinder()
             # Cleanup: remove all temporary symbols
             while self.temporary_symbols:
                 pos = next(iter(self.temporary_symbols))

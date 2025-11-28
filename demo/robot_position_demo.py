@@ -35,7 +35,7 @@ def main():
     api = RobotPositionAPI(
         topic='robotPositions',
         msg_type='string',
-        min_certainty=0.25,
+        min_certainty=0.45,
         max_speed=500.0
     )
     
